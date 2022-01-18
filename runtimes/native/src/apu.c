@@ -83,6 +83,19 @@ static int16_t getCurrentVolume (const Channel* channel) {
     }
 }
 
+static inline float polyblep(float phase, float phaseInc)
+{
+    if (phase < phaseInc) {
+        const float t = phase / phaseInc;
+        return t+t - t*t;
+    } else if (phase > 1.f - phaseInc) {
+        const float t = (phase - (1.f - phaseInc)) / phaseInc;
+        return 1.f - (t+t - t*t);
+    } else {
+        return 1.f;
+    }
+}
+
 void w4_apuInit () {
     channels[3].noise.seed = 0x0001;
 }
@@ -152,8 +165,9 @@ void w4_apuWriteSamples (int16_t* output, unsigned long frames) {
                     sample = volume * channel->noise.lastRandom;
 
                 } else {
-                    channel->phase += (float)freq / SAMPLE_RATE;
-                    if (channel->phase > 1) {
+                    const float phaseInc = (float)freq / SAMPLE_RATE;
+                    channel->phase += phaseInc;
+                    if (channel->phase >= 1) {
                         channel->phase--;
                     }
 
@@ -169,7 +183,17 @@ void w4_apuWriteSamples (int16_t* output, unsigned long frames) {
 
                     } else {
                         // Pulse channel
-                        sample = channel->phase < channel->pulse.dutyCycle ? volume : -volume;
+                        if (channel->phase < channel->pulse.dutyCycle) {
+                            // Map duty to 0->1
+                            const float dutyPhase = channel->phase / channel->pulse.dutyCycle;
+                            const float dutyPhaseInc = phaseInc / channel->pulse.dutyCycle;
+                            sample = volume * polyblep(dutyPhase, dutyPhaseInc);
+                        } else {
+                            // Map duty to 0->1
+                            const float dutyPhase = (channel->phase - channel->pulse.dutyCycle) / (1.f - channel->pulse.dutyCycle);
+                            const float dutyPhaseInc = phaseInc / (1.f - channel->pulse.dutyCycle);
+                            sample = -volume * polyblep(dutyPhase, dutyPhaseInc);
+                        }
                     }
                 }
 
