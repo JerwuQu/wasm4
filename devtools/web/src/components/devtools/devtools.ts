@@ -114,7 +114,7 @@ export class Wasm4Devtools extends LitElement {
       ${gasUsed > 0 ? html`
       <section class="inline-section">
         <h4>gas</h4>
-        <span class="info-box text-primary">${gasUsed}</span>
+        <span class="info-box text-primary">${gasUsed.toLocaleString('en-US')}</span>
       </section>
       ` : ''}
       <section class="cart-size-wrapper">
