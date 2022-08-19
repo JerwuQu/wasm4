@@ -6,6 +6,7 @@ const qrcode = require("qrcode");
 const { Server: WebSocketServer } = require("ws");
 const open = require("open");
 const { exit } = require("process");
+const metering = require("wasm-metering");
 
 var attempts = 0;
 var PORT = 0;
@@ -14,7 +15,14 @@ var FIRST_PORT = 0;
 function start (cartFile, opts) {
     const app = express();
     app.get("/cart.wasm", (req, res) => {
-        fs.createReadStream(cartFile).pipe(res);
+        if (opts.metering) {
+            fs.readFile(cartFile, (err, wasmData) => {
+                if (err) throw err;
+                res.send(metering.meterWASM(wasmData));
+            });
+        } else {
+            fs.createReadStream(cartFile).pipe(res);
+        }
     });
     app.get("/cart.wasm.map", (req, res) => {
         fs.createReadStream(cartFile+".map").pipe(res);

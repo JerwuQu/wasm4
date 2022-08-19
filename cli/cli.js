@@ -105,6 +105,7 @@ program.command("watch")
             .env("W4_NO_QR")
             .default(false)
     )
+    .option("--metering", "Inject gas metering into WASM", false)
     .action(opts => {
         const watch = require("./lib/watch");
         watch.start(opts);
@@ -129,6 +130,7 @@ program.command("run <cart>")
             .env("W4_NO_QR")
             .default(false)
     )
+    .option("--metering", "Inject gas metering into WASM", false)
     .action((cart, opts) => {
         const server = require("./lib/server");
         server.start(cart, opts);
