@@ -111,10 +111,12 @@ export class Wasm4Devtools extends LitElement {
         <h4>fps</h4>
         <span class="info-box text-primary">${fps}</span>
       </section>
+      ${gasUsed > 0 ? html`
       <section class="inline-section">
         <h4>gas</h4>
         <span class="info-box text-primary">${gasUsed}</span>
       </section>
+      ` : ''}
       <section class="cart-size-wrapper">
         <h4>cartridge size ${wasmBufferByteLen > MAX_CART_SIZE ? `⚠️` : ''}</h4>
         <div class="size-box">
