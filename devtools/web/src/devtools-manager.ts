@@ -45,6 +45,7 @@ class BufferedRuntimeData implements BufferedData {
 interface RuntimeInfo {
   data: DataView;
   wasmBufferByteLen: number;
+  gasUsed: number;
 }
 
 export class DevtoolsManager {
@@ -71,7 +72,8 @@ export class DevtoolsManager {
       this._notifyUpdateCompleted(
         runtimeInfo.data,
         runtimeInfo.wasmBufferByteLen,
-        fps
+        fps,
+        runtimeInfo.gasUsed,
       );
     }
   };
@@ -99,12 +101,13 @@ export class DevtoolsManager {
   };
 
   private _notifyUpdateCompleted = throttle(
-    (dataView: DataView, wasmBufferByteLen: number, fps: number) => {
+    (dataView: DataView, wasmBufferByteLen: number, fps: number, gasUsed: number) => {
       window.dispatchEvent(
         createUpdateCompletedEvent({
           dataView,
           wasmBufferByteLen,
           fps,
+          gasUsed,
           bufferedData: this._bufferedData.flush(),
         })
       );
