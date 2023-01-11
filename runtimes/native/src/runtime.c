@@ -13,6 +13,9 @@
 #define HEIGHT 160
 
 #define SYSTEM_PRESERVE_FRAMEBUFFER 1
+#define SYSTEM_COLOR_EXT 4
+
+#define CAPABILITY_COLOR_EXT 1
 
 typedef struct {
     uint8_t _padding[4];
@@ -23,25 +26,33 @@ typedef struct {
     int16_t mouseY;
     uint8_t mouseButtons;
     uint8_t systemFlags;
-    uint8_t _reserved[128];
-    uint8_t framebuffer[WIDTH*HEIGHT>>2];
+    uint8_t _netplay;
+    uint8_t capabilityFlags;
+    uint8_t _reserved[126];
+    uint8_t framebuffer[WIDTH*HEIGHT>>2]; // Unused with Color Extension
     uint8_t _user[58976];
 } Memory;
 
 typedef struct {
     Memory memory;
     w4_Disk disk;
+    uint32_t screen[WIDTH*HEIGHT];
     bool firstFrame;
+    bool colorEnabled;
 } SerializedState;
 
 static Memory* memory;
 static w4_Disk* disk;
+static uint32_t screen[WIDTH*HEIGHT];
 static bool firstFrame;
+static bool colorEnabled;
 
 void w4_runtimeInit (uint8_t* memoryBytes, w4_Disk* diskBytes) {
     memory = (Memory*)memoryBytes;
     disk = diskBytes;
+    memset(screen, 0, sizeof(screen));
     firstFrame = true;
+    colorEnabled = false;
 
     // Set memory to initial state
     memset(memory, 0, 1 << 16);
@@ -53,6 +64,7 @@ void w4_runtimeInit (uint8_t* memoryBytes, w4_Disk* diskBytes) {
     memory->drawColors[1] = 0x12;
     w4_write16LE(&memory->mouseX, 0x7fff);
     w4_write16LE(&memory->mouseY, 0x7fff);
+    memory->capabilityFlags = CAPABILITY_COLOR_EXT;
 
     w4_apuInit();
     w4_framebufferInit(&memory->drawColors, memory->framebuffer);
@@ -174,21 +186,44 @@ void w4_runtimeTracef (const uint8_t* str, const void* stack) {
     // putchar('\n');
 }
 
-void w4_runtimeUpdate () {
-    if (firstFrame) {
-        firstFrame = false;
-        w4_wasmCallStart();
-    } else if (!(memory->systemFlags & SYSTEM_PRESERVE_FRAMEBUFFER)) {
-        w4_framebufferClear();
-    }
-    w4_wasmCallUpdate();
+void w4_framebufferToScreen () {
     uint32_t palette[4] = {
         w4_read32LE(&memory->palette[0]),
         w4_read32LE(&memory->palette[1]),
         w4_read32LE(&memory->palette[2]),
         w4_read32LE(&memory->palette[3]),
     };
-    w4_windowComposite(palette, memory->framebuffer);
+
+    // Convert indexed 2bpp framebuffer to XRGB screen
+    uint32_t* out = screen;
+    for (int n = 0; n < 160*160/4; ++n) {
+        uint8_t quartet = memory->framebuffer[n];
+        int color1 = (quartet & 0b00000011) >> 0;
+        int color2 = (quartet & 0b00001100) >> 2;
+        int color3 = (quartet & 0b00110000) >> 4;
+        int color4 = (quartet & 0b11000000) >> 6;
+
+        *out++ = palette[color1];
+        *out++ = palette[color2];
+        *out++ = palette[color3];
+        *out++ = palette[color4];
+    }
+}
+
+void w4_runtimeUpdate () {
+    if (firstFrame) {
+        firstFrame = false;
+        w4_wasmCallStart();
+        w4_framebufferToScreen();
+        colorEnabled = (memory->systemFlags & SYSTEM_COLOR_EXT) != 0;
+    } else if (!(memory->systemFlags & SYSTEM_PRESERVE_FRAMEBUFFER) && !colorEnabled) {
+        w4_framebufferClear();
+    }
+    w4_wasmCallUpdate();
+    if (!colorEnabled) {
+        w4_framebufferToScreen();
+    }
+    w4_windowComposite(screen);
 }
 
 int w4_runtimeSerializeSize () {
@@ -199,12 +234,16 @@ void w4_runtimeSerialize (void* dest) {
     SerializedState* state = dest;
     memcpy(&state->memory, memory, 1 << 16);
     memcpy(&state->disk, disk, sizeof(w4_Disk));
+    memcpy(&state->screen, screen, sizeof(screen));
     state->firstFrame = firstFrame;
+    state->colorEnabled = colorEnabled;
 }
 
 void w4_runtimeUnserialize (const void* src) {
     const SerializedState* state = src;
     memcpy(memory, &state->memory, 1 << 16);
     memcpy(disk, &state->disk, sizeof(w4_Disk));
+    memcpy(screen, &state->screen, sizeof(screen));
     firstFrame = state->firstFrame;
+    colorEnabled = state->colorEnabled;
 }

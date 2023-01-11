@@ -50,6 +50,7 @@ module.exports = {
             "reference/hotkeys",
             "reference/cli",
             "reference/inspiration",
+            "reference/color-ext",
         ],
     },
     {

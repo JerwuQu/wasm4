@@ -13,7 +13,8 @@ WASM-4 uses a fixed memory layout of 64 KB.
 | `$001e` | 1            | [MOUSE_BUTTONS](#mouse_buttons) |
 | `$001f` | 1            | [SYSTEM_FLAGS](#system_flags)   |
 | `$0020` | 1            | [NETPLAY](#netplay)             |
-| `$0021` | 127          | Reserved for future use         |
+| `$0021` | 1            | [CAPABILITIES](#capabilities)   |
+| `$0022` | 126          | Reserved for future use         |
 | `$00a0` | 6400         | [FRAMEBUFFER](#framebuffer)     |
 | `$19a0` | 58976        | Available program memory        |
 
@@ -87,10 +88,11 @@ Byte containing the mouse buttons state.
 
 Byte containing flags that modify WASM-4's operation. By default all flags are off.
 
-| Bit | Name                          | Description                                       |
-| --- | ---                           | ---                                               |
-| 0   | `SYSTEM_PRESERVE_FRAMEBUFFER` | Prevent clearing the framebuffer between frames.  |
-| 1   | `SYSTEM_HIDE_GAMEPAD_OVERLAY` | Hide the gamepad UI overlay on mobile.            |
+| Bit | Name                          | Description                                                           |
+| --- | ---                           | ---                                                                   |
+| 0   | `SYSTEM_PRESERVE_FRAMEBUFFER` | Prevent clearing the framebuffer between frames.                      |
+| 1   | `SYSTEM_HIDE_GAMEPAD_OVERLAY` | Hide the gamepad UI overlay on mobile.                                |
+| 2   | `SYSTEM_COLOR_EXT`            | Use the [Color Extension](color-ext). Can only be changed in `start`. |
 
 ### NETPLAY
 
@@ -100,6 +102,14 @@ Byte containing netplay multiplayer state.
 | ---   | ---                                 |
 | 0 - 1 | Local player index (0 to 3).        |
 | 2     | Set if netplay is currently active. |
+
+### CAPABILITIES
+
+Byte containing flags indictating capabilities supported by the runtime.
+
+| Bit | Name                   | Description                                        |
+| --- | ---                    | ---                                                |
+| 0   | `CAPABILITY_COLOR_EXT` | Runtime supports the [Color Extension](color-ext). |
 
 ### FRAMEBUFFER
 
