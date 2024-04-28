@@ -7,7 +7,7 @@
 #define MAX_VOLUME 0x1333 // ~15% of INT16_MAX
 // The triangle channel sounds a bit quieter than the others, so give it higher amplitude
 #define MAX_VOLUME_TRIANGLE 0x2000 // ~25% of INT16_MAX
-// Also the triangle channel prevent popping on hard stops by adding a 1 ms release
+// Also for the triangle channel, prevent popping on hard stops by adding a 1 ms release
 #define RELEASE_TIME_TRIANGLE (SAMPLE_RATE / 1000)
 
 typedef struct {
@@ -32,8 +32,8 @@ typedef struct {
     /** Time the tone should end. */
     unsigned long long releaseTime;
 
-    /** The tick the tone should end. */
-    unsigned long long endTick;
+    /** Tick at the end of the sustain period where the tone switch over to release. */
+    unsigned long long sustainTick;
 
     /** Sustain volume level. */
     int16_t sustainVolume;
@@ -100,7 +100,7 @@ static float getCurrentFrequency (const Channel* channel) {
 }
 
 static int16_t getCurrentVolume (const Channel* channel) {
-    if (time >= channel->sustainTime && (channel->releaseTime - channel->sustainTime) > RELEASE_TIME_TRIANGLE) {
+    if (ticks > channel->sustainTick) {
         // Release
         return ramp(channel->sustainVolume, 0, channel->sustainTime, channel->releaseTime);
     } else if (time >= channel->decayTime) {
@@ -136,6 +136,17 @@ void w4_apuInit () {
 }
 
 void w4_apuTick () {
+    // Update releaseTime for channels that should begin their release period this tick.
+    // This fixes drift drift between ticks and samples.
+    for (int channelIdx = 0; channelIdx < 4; ++channelIdx) {
+        Channel* channel = &channels[channelIdx];
+        if (ticks == channel->sustainTick) {
+            const delta = time - channel->sustainTime;
+            channel->sustainTime = time;
+            channel->releaseTime += delta;
+        }
+    }
+
     ticks++;
 }
 
@@ -160,7 +171,7 @@ void w4_apuTone (int frequency, int duration, int volume, int flags) {
     Channel* channel = &channels[channelIdx];
 
     // Restart the phase if this channel wasn't already playing
-    if (time > channel->releaseTime && ticks != channel->endTick) {
+    if (time > channel->releaseTime && ticks != channel->sustainTick) {
         channel->phase = (channelIdx == 2) ? 0.25 : 0;
     }
     if (noteMode) {
@@ -175,7 +186,7 @@ void w4_apuTone (int frequency, int duration, int volume, int flags) {
     channel->decayTime = channel->attackTime + SAMPLE_RATE*decay/60;
     channel->sustainTime = channel->decayTime + SAMPLE_RATE*sustain/60;
     channel->releaseTime = channel->sustainTime + SAMPLE_RATE*release/60;
-    channel->endTick = ticks + attack + decay + sustain + release;
+    channel->sustainTick = ticks + attack + decay + sustain;
     int16_t maxVolume = (channelIdx == 2) ? MAX_VOLUME_TRIANGLE : MAX_VOLUME;
     channel->sustainVolume = maxVolume * sustainVolume/100;
     channel->peakVolume = peakVolume ? maxVolume * peakVolume/100 : maxVolume;
@@ -208,7 +219,7 @@ void w4_apuWriteSamples (int16_t* output, unsigned long frames) {
         for (int channelIdx = 0; channelIdx < 4; ++channelIdx) {
             Channel* channel = &channels[channelIdx];
 
-            if (time < channel->releaseTime || ticks == channel->endTick) {
+            if (time < channel->releaseTime || ticks == channel->sustainTick) {
                 float freq = getCurrentFrequency(channel);
                 int16_t volume = getCurrentVolume(channel);
                 int16_t sample;
