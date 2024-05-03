@@ -58,18 +58,15 @@ export class DevtoolsManager {
    */
   private _bufferedData = new BufferedRuntimeData();
 
-  private _fpsBuffer : number[] = [0,0,0,0,0,0,0,0,0,0];
-  private _fpsBufferIdx = 0;
+  private _deltaBuffer : number[] = [0,0,0,0,0,0,0,0,0,0];
+  private _deltaBufferIdx = 0;
   //calculate an average FPS for the last 10 frames
   private _calcAvgFPS = () => {
-    let sum = this._fpsBuffer[0];
-    for (let i = 1; i < 10; i++)
-      sum += this._fpsBuffer[i];
-    return Math.floor(sum / 10);
+    return Math.round(1_000 / (this._deltaBuffer.reduce((acc, fps) => acc + fps, 0) / this._deltaBuffer.length));
   }
   private _nextFPSBufferIdx = () => {
-    (this._fpsBufferIdx == 9) ? this._fpsBufferIdx = 0 : this._fpsBufferIdx++;
-    return this._fpsBufferIdx;
+    this._deltaBufferIdx = (this._deltaBufferIdx + 1) % this._deltaBuffer.length;
+    return this._deltaBufferIdx;
   }
 
   /**
@@ -80,7 +77,7 @@ export class DevtoolsManager {
     deltaFrame: number
   ) => {
     if (this._enabled) {
-      this._fpsBuffer[this._nextFPSBufferIdx()] = 1_000 / deltaFrame;
+      this._deltaBuffer[this._nextFPSBufferIdx()] = deltaFrame;
       this._bufferedData.update(runtimeInfo.data);
       this._notifyUpdateCompleted(
         runtimeInfo.data,

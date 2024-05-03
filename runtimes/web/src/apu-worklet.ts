@@ -201,6 +201,10 @@ class APUProcessor extends AudioWorkletProcessor {
         for (let ii = 0, frames = outputLeft.length; ii < frames; ++ii, ++this.time) {
             let mixLeft = 0, mixRight = 0;
 
+            if ((this.time % Math.round(SAMPLE_RATE / 60)) == 0) {
+                this.port.postMessage('tick');
+            }
+
             for (let channelIdx = 0; channelIdx < 4; ++channelIdx) {
                 const channel = this.channels[channelIdx];
 

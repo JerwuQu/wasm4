@@ -22,7 +22,7 @@ export class Runtime {
     diskBuffer: ArrayBuffer;
     diskSize: number;
 
-    constructor (diskName: string) {
+    constructor (diskName: string, frameCallback: () => void) {
         const canvas = document.createElement("canvas");
         canvas.width = constants.WIDTH;
         canvas.height = constants.HEIGHT;
@@ -40,7 +40,7 @@ export class Runtime {
 
         this.compositor = new WebGLCompositor(gl);
         
-        this.apu = new APU();
+        this.apu = new APU(frameCallback);
 
         this.diskName = diskName;
         this.diskBuffer = new ArrayBuffer(constants.STORAGE_SIZE);
@@ -319,7 +319,7 @@ export class Runtime {
     }
 
     start () {
-        let start_function = this.wasm!.exports["start"];
+        const start_function = this.wasm!.exports["start"];
         if (typeof start_function === "function") {
             this.bluescreenOnError(start_function);
         }
@@ -334,7 +334,7 @@ export class Runtime {
             this.framebuffer.clear();
         }
 
-        let update_function = this.wasm!.exports["update"];
+        const update_function = this.wasm!.exports["update"];
         if (typeof update_function === "function") {
             this.bluescreenOnError(update_function);
         }

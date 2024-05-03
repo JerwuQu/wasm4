@@ -13,7 +13,7 @@ export class APU {
     processor!: APUProcessor;
     processorPort!: MessagePort;
 
-    constructor () {
+    constructor (private frameCallback: () => void) {
         this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: 44100, // must match SAMPLE_RATE in worklet
         });
@@ -24,35 +24,43 @@ export class APU {
         const blob = new Blob([workletRawSource], {type: "application/javascript"});
         const url = URL.createObjectURL(blob);
 
-        try {
-            await audioCtx.audioWorklet.addModule(url);
+        //try {
+        //    await audioCtx.audioWorklet.addModule(url);
 
-            const workletNode = new AudioWorkletNode(audioCtx, "wasm4-apu", {
-                outputChannelCount: [2],
-            });
-            this.processorPort = workletNode.port;
-            workletNode.connect(audioCtx.destination);
+        //    const workletNode = new AudioWorkletNode(audioCtx, "wasm4-apu", {
+        //        outputChannelCount: [2],
+        //    });
+        //    this.processorPort = workletNode.port;
+        //    this.processorPort.onmessage = () => {
+        //        this.frameCallback(); // TODO: also for createScriptProcessor
+        //    };
+        //    workletNode.connect(audioCtx.destination);
 
-        } catch (error) {
-            console.warn("AudioWorklet loading failed, falling back to slow audio", error);
+        //} catch (error) {
+            console.warn("AudioWorklet loading failed, falling back to slow audio");
 
             // Scoop out the APUProcessor with a simple polyfill
-            let processor!: APUProcessor;
+            let processor!: any;
             const registerProcessor: typeof globalThis.registerProcessor = (name, p) => {
-                processor = new p() as APUProcessor;
+                processor = new p() as any;
             }
             const fn = new Function("registerProcessor", "AudioWorkletProcessor", workletRawSource);
             fn(registerProcessor, class {});
             this.processor = processor;
+            processor.port = {
+                postMessage: () => {
+                    this.frameCallback(); // TODO: also for createScriptProcessor
+                }
+            };
 
-            const scriptNode = audioCtx.createScriptProcessor(1024, 0, 2);
+            const scriptNode = audioCtx.createScriptProcessor(256, 0, 2); // NOTE: buffer needs to be smaller than a frame... still not great...
             scriptNode.onaudioprocess = event => {
                 const outputLeft = event.outputBuffer.getChannelData(0);
                 const outputRight = event.outputBuffer.getChannelData(1);
                 processor.process(null, [[outputLeft, outputRight]], null);
             };
             scriptNode.connect(audioCtx.destination);
-        }
+        //}
     }
 
     tick() {

@@ -85,12 +85,18 @@ export class App extends LitElement {
         // Try to begin playing audio
         this.runtime.unlockAudio();
     }
+    devtoolsManager!: { toggleDevtools(): void; updateCompleted(...args: unknown[]): void; };
+    lastFrameTime: number = 0;
+    frameCalls: number = 0;
+    lastSecond: number = 0;
 
     constructor () {
         super();
 
         this.diskPrefix = document.getElementById("wasm4-disk-prefix")?.textContent ?? utils.getUrlParam("disk-prefix") as string;
-        this.runtime = new Runtime(`${this.diskPrefix}-disk`);
+        this.runtime = new Runtime(`${this.diskPrefix}-disk`, () => {
+            this.nextFrame();
+        });
 
         this.init();
     }
@@ -133,16 +139,16 @@ export class App extends LitElement {
             await runtime.load(await loadCartWasm());
         }
 
-        let devtoolsManager = {
+        this.devtoolsManager = {
             toggleDevtools () {
                 // Nothing
             },
-            updateCompleted (...args: unknown[]) {
+            updateCompleted () {
                 // Nothing
             },
         };
         if (constants.GAMEDEV_MODE) {
-            devtoolsManager = await import('@wasm4/web-devtools').then(({ DevtoolsManager}) => new DevtoolsManager());
+            this.devtoolsManager = await import('@wasm4/web-devtools').then(({ DevtoolsManager}) => new DevtoolsManager());
         }
 
         if (!this.netplay) {
@@ -243,7 +249,7 @@ export class App extends LitElement {
             "4": this.loadGameState.bind(this),
             "r": this.resetCart.bind(this),
             "R": this.resetCart.bind(this),
-            "F8": devtoolsManager.toggleDevtools,
+            "F8": this.devtoolsManager.toggleDevtools,
             "F9": takeScreenshot,
             "F10": recordVideo,
             "F11": utils.requestFullscreen,
@@ -377,118 +383,108 @@ export class App extends LitElement {
             }
         }
 
-        const pollPhysicalGamepads = () => {
-            if (!navigator.getGamepads) {
-                return; // Browser doesn't support gamepads
+        this.nextFrame();
+    }
+
+    pollPhysicalGamepads () {
+        if (!navigator.getGamepads) {
+            return; // Browser doesn't support gamepads
+        }
+
+        for (const gamepad of navigator.getGamepads()) {
+            if (gamepad == null) {
+                continue; // Disconnected gamepad
+            } else if (gamepad.mapping != "standard") {
+                // The gamepad is available, but nonstandard, so we don't actually know how to read it.
+                // Let's warn once, and not use this gamepad afterwards.
+                if (!this.gamepadUnavailableWarned.has(gamepad.id)) {
+                    this.gamepadUnavailableWarned.add(gamepad.id);
+                    this.notifications.show("Unsupported gamepad: " + gamepad.id);
+                }
+                continue;
             }
 
-            for (const gamepad of navigator.getGamepads()) {
-                if (gamepad == null) {
-                    continue; // Disconnected gamepad
-                } else if (gamepad.mapping != "standard") {
-                    // The gamepad is available, but nonstandard, so we don't actually know how to read it.
-                    // Let's warn once, and not use this gamepad afterwards.
-                    if (!this.gamepadUnavailableWarned.has(gamepad.id)) {
-                        this.gamepadUnavailableWarned.add(gamepad.id);
-                        this.notifications.show("Unsupported gamepad: " + gamepad.id);
-                    }
-                    continue;
-                }
+            // https://www.w3.org/TR/gamepad/#remapping
+            const buttons = gamepad.buttons;
+            const axes = gamepad.axes;
 
-                // https://www.w3.org/TR/gamepad/#remapping
-                const buttons = gamepad.buttons;
-                const axes = gamepad.axes;
+            let mask = 0;
+            if (buttons[12].pressed || axes[1] < -0.5) {
+                mask |= constants.BUTTON_UP;
+            }
+            if (buttons[13].pressed || axes[1] > 0.5) {
+                mask |= constants.BUTTON_DOWN;
+            }
+            if (buttons[14].pressed || axes[0] < -0.5) {
+                mask |= constants.BUTTON_LEFT;
+            }
+            if (buttons[15].pressed || axes[0] > 0.5) {
+                mask |= constants.BUTTON_RIGHT;
+            }
+            if (buttons[0].pressed || buttons[3].pressed || buttons[5].pressed || buttons[7].pressed) {
+                mask |= constants.BUTTON_X;
+            }
+            if (buttons[1].pressed || buttons[2].pressed || buttons[4].pressed || buttons[6].pressed) {
+                mask |= constants.BUTTON_Z;
+            }
 
-                let mask = 0;
-                if (buttons[12].pressed || axes[1] < -0.5) {
-                    mask |= constants.BUTTON_UP;
-                }
-                if (buttons[13].pressed || axes[1] > 0.5) {
-                    mask |= constants.BUTTON_DOWN;
-                }
-                if (buttons[14].pressed || axes[0] < -0.5) {
-                    mask |= constants.BUTTON_LEFT;
-                }
-                if (buttons[15].pressed || axes[0] > 0.5) {
-                    mask |= constants.BUTTON_RIGHT;
-                }
-                if (buttons[0].pressed || buttons[3].pressed || buttons[5].pressed || buttons[7].pressed) {
-                    mask |= constants.BUTTON_X;
-                }
-                if (buttons[1].pressed || buttons[2].pressed || buttons[4].pressed || buttons[6].pressed) {
-                    mask |= constants.BUTTON_Z;
-                }
+            if (buttons[9].pressed) {
+                this.showMenu = true;
+            }
 
-                if (buttons[9].pressed) {
-                    this.showMenu = true;
-                }
+            this.inputState.gamepad[gamepad.index % 4] = mask;
+        }
+    }
 
-                this.inputState.gamepad[gamepad.index % 4] = mask;
+    nextFrame() {
+        this.pollPhysicalGamepads();
+        let input = this.inputState;
+
+        if (this.menuOverlay != null) {
+            this.menuOverlay.applyInput();
+
+            // Pause while the menu is open, unless netplay is active
+            if (this.netplay) {
+                // Prevent inputs on the menu from being passed through to the game
+                input = new InputState();
+            } else {
+                return; // Pause updates and rendering
             }
         }
 
-        // When we should perform the next update
-        let timeNextUpdate = performance.now();
-        // Track the timestamp of the last frame
-        let lastTimeFrameStart = timeNextUpdate;
+        let calledUpdate = false;
 
-        const onFrame = (timeFrameStart: number) => {
-            requestAnimationFrame(onFrame);
-
-            pollPhysicalGamepads();
-            let input = this.inputState;
-
-            if (this.menuOverlay != null) {
-                this.menuOverlay.applyInput();
-
-                // Pause while the menu is open, unless netplay is active
-                if (this.netplay) {
-                    // Prevent inputs on the menu from being passed through to the game
-                    input = new InputState();
-                } else {
-                    return; // Pause updates and rendering
-                }
+        if (this.netplay) {
+            if (this.netplay.update(input.gamepad[0])) {
+                calledUpdate = true;
             }
-
-            let calledUpdate = false;
-
-            // Prevent timeFrameStart from getting too far ahead and death spiralling
-            if (timeFrameStart - timeNextUpdate >= 200) {
-                timeNextUpdate = timeFrameStart;
+        } else {
+            // Pass inputs into runtime memory
+            for (let playerIdx = 0; playerIdx < 4; ++playerIdx) {
+                this.runtime.setGamepad(playerIdx, input.gamepad[playerIdx]);
             }
+            this.runtime.setMouse(input.mouseX, input.mouseY, input.mouseButtons);
+            this.runtime.update();
+            calledUpdate = true;
+        }
 
-            while (timeFrameStart >= timeNextUpdate) {
-                timeNextUpdate += 1000/60;
+        if (calledUpdate) {
+            this.hideGamepadOverlay = !!this.runtime.getSystemFlag(constants.SYSTEM_HIDE_GAMEPAD_OVERLAY);
 
-                if (this.netplay) {
-                    if (this.netplay.update(input.gamepad[0])) {
-                        calledUpdate = true;
-                    }
+            this.runtime.composite();
 
-                } else {
-                    // Pass inputs into runtime memory
-                    for (let playerIdx = 0; playerIdx < 4; ++playerIdx) {
-                        runtime.setGamepad(playerIdx, input.gamepad[playerIdx]);
-                    }
-                    runtime.setMouse(input.mouseX, input.mouseY, input.mouseButtons);
-                    runtime.update();
-                    calledUpdate = true;
-                }
-            }
-
-            if (calledUpdate) {
-                this.hideGamepadOverlay = !!runtime.getSystemFlag(constants.SYSTEM_HIDE_GAMEPAD_OVERLAY);
-
-                runtime.composite();
-
-                if (constants.GAMEDEV_MODE) {
-                    // FIXED(2023-12-13): Pass the correct FPS for display                    
-                    devtoolsManager.updateCompleted(runtime, timeFrameStart - lastTimeFrameStart);
-                    lastTimeFrameStart = timeFrameStart;
+            if (constants.GAMEDEV_MODE) {
+                const time = performance.now();
+                this.devtoolsManager.updateCompleted(this.runtime, time - this.lastFrameTime);
+                this.lastFrameTime = time;
+                this.frameCalls++;
+                if (time >= this.lastSecond + 1000) {
+                    this.lastSecond += 1000;
+                    console.log('fps', this.frameCalls);
+                    this.frameCalls = 0;
                 }
             }
         }
-        requestAnimationFrame(onFrame);
     }
 
     onMenuButtonPressed () {
@@ -571,11 +567,11 @@ export class App extends LitElement {
 
         input.addEventListener("change", () => {
             const files = input.files as FileList;
-            let reader = new FileReader();
+            const reader = new FileReader();
             
             reader.addEventListener("load", () => {
-                let result = new Uint8Array(reader.result as ArrayBuffer).slice(0, constants.STORAGE_SIZE);
-                let disk = new Uint8Array(constants.STORAGE_SIZE);
+                const result = new Uint8Array(reader.result as ArrayBuffer).slice(0, constants.STORAGE_SIZE);
+                const disk = new Uint8Array(constants.STORAGE_SIZE);
 
                 disk.set(result);
                 app.runtime.diskBuffer = disk.buffer;
